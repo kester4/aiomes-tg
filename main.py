@@ -68,21 +68,21 @@ async def begin_auth(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AuthState.enter_login)
 
 
-@dp.message(AuthState.enter_login)
+@dp.message(AuthState.enter_login, F.text)
 async def proceed_login(message: Message, state: FSMContext):
     await state.update_data(login=message.text)
     await state.set_state(AuthState.enter_password)
     message_dict[message.chat.id].extend([await message.answer("Введите пароль:"), message])
 
 
-@dp.message(AuthState.enter_password)
+@dp.message(AuthState.enter_password, F.text)
 async def proceed_pass(message: Message, state: FSMContext):
     await state.update_data(password=message.text)
     message_dict[message.chat.id].append(message)
     await start_auth(message, state)
 
 
-@dp.message(AuthState.enter_2fa)
+@dp.message(AuthState.enter_2fa, F.text)
 async def code_state(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
