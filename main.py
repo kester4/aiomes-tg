@@ -403,7 +403,7 @@ async def handle_bad_request(error: ErrorEvent):
     await cb.message.edit_text('Возникла ошибка на стороне МЭШ. Попробуйте позже', reply_markup=return_button)
 
 
-@error_router.error()
+@error_router.error(ExceptionTypeFilter(KeyError))
 async def handle_rest(error: ErrorEvent):
     cb = error.update.callback_query
     user_id = cb.from_user.id
