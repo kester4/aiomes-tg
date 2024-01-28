@@ -19,18 +19,19 @@ from aiogram.fsm.context import FSMContext
 from modules import *
 from keyboards import *
 from db import UsersDB
-from admin_handlers import *
+from utils import *
 
-logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, parse_mode="html", disable_web_page_preview=True)
 dp = Dispatcher()
 error_router = Router()
+admin_router = Router()
+admin_router.message.filter(F.from_user.id.in_({1145870470, 1117675225}))
 
 db = UsersDB()
 
-message_dict = {}
-files_messages = {}
-mailing_dict = {}
+message_dict = dict()
+active_messages = load_data(filename='active_messages')
+mailing_dict = load_data(filename='mailing')
 
 
 class AuthState(StatesGroup):
@@ -41,15 +42,25 @@ class AuthState(StatesGroup):
 
 @dp.message(Command("start"))
 async def start(message: Message):
-    await message.answer(f"Привет, <b>{message.chat.full_name}</b>!\nЯ AIOMES — <i>альтернативный способ</i> "
-                         f"доступа к МЭШ <i>для учеников</i>.\n\n"
-                         f"Для начала работы необходимо авторизоваться c данными от mos.ru\n\n"
-                         f"<b>Воспользуйтесь кнопкой ниже.</b>\n\n", reply_markup=auth_kb)
+    user_id = message.from_user.id
+
+    if user_id in active_messages:
+        try:
+            await bot.edit_message_reply_markup(chat_id=user_id, message_id=active_messages[user_id])
+        except TelegramBadRequest:
+            pass
+
+    msg = await message.answer(GREETING.format(message.from_user.first_name), reply_markup=auth_kb)
+    active_messages[user_id] = msg.message_id
+
     try:
         await message.delete()
     except TelegramBadRequest:
         pass
-    message_dict[message.chat.id] = []
+
+    message_dict[user_id] = []
+    if user_id not in mailing_dict:
+        mailing_dict[user_id] = 0
 
 
 @dp.callback_query(F.data == "new_user")
@@ -140,17 +151,17 @@ async def send_main_menu(message: Message, user: aiomes.Client, delete: bool):
     users_dates[user_id] = date.today()
     await db.add_user(user_id, user)
 
-    schedule = await parse_short_schedule(
-        await user.get_schedule_short([date.today() + timedelta(i) for i in range(7)]))
-    await db.insert_short_schedule(schedule, user_id)
-    users_schedules[user_id] = schedule
+    m = await message.answer(f"<i>Авторизация успешна!</i>\n\n"
+                             f"Добро пожаловать в главное меню бота, <b>{user.first_name} {user.last_name}</b>",
+                             reply_markup=menu_kb)
+    active_messages[user_id] = m.message_id
 
-    await message.answer(f"<i>Авторизация успешна!</i>\n\n"
-                         f"Добро пожаловать в главное меню бота, <b>{user.first_name} {user.last_name}</b>",
-                         reply_markup=menu_kb)
     if delete:
-        for msg in message_dict[user_id]:
-            await msg.delete()
+        try:
+            for msg in message_dict[user_id]:
+                await msg.delete()
+        except TelegramBadRequest:
+            pass
 
 
 @dp.callback_query(F.data == "back_to_menu")
@@ -179,12 +190,14 @@ async def send_schedule(callback: CallbackQuery):
     is_short = await db.get_user_settings(user_id)
 
     if is_short[1]:
+        if user_id not in users_schedules:
+            users_schedules[user_id] = await get_short_schedule(db, user, user_id)
         schedule = users_schedules[user_id]
-        text = f'{schedule[str(user_date.weekday())]}'
+        text = schedule[str(user_date.weekday())]
 
     else:
         schedule = await user.get_schedule(user_date)
-        text = f'{await parse_schedule(schedule)}'
+        text = await parse_schedule(schedule)
 
     await callback.message.edit_text(text=f'{await normal_date(user_date)}\n\n{text}', reply_markup=schedule_kb)
 
@@ -303,7 +316,8 @@ async def send_school(callback: CallbackQuery):
 
     if call_target == 'show':
         if callback.data.endswith('_delete'):
-            await callback.message.answer("Выберите раздел:", reply_markup=school_kb)
+            msg = await callback.message.answer("Выберите раздел:", reply_markup=school_kb)
+            active_messages[user_id] = msg.message_id
             await callback.message.delete()
         else:
             await callback.message.edit_text("Выберите раздел:", reply_markup=school_kb)
@@ -343,8 +357,10 @@ async def send_menus(callback: CallbackQuery):
     async with async_open(name, 'w', encoding='utf-16') as file:
         await file.write(f'{caption}{WATERMARK}{menu}')
 
-    await callback.message.answer_document(FSInputFile(name), caption="<b>Выдача сформирована!</b>",
-                                           reply_markup=return_to_school_delete)
+    m = await callback.message.answer_document(FSInputFile(name), caption="<b>Выдача сформирована!</b>",
+                                               reply_markup=return_to_school_delete)
+
+    active_messages[user_id] = m.message_id
     os.remove(name)
     await msg.delete()
 
@@ -441,20 +457,58 @@ async def handle_rest(error: ErrorEvent):
     await start(message)
 
 
+@admin_router.message(Command("stats"))
+async def send_stats(m: Message):
+    await m.answer(f'Авторизованных: {len(users_objects)}\n\nВсего: {len(mailing_dict)}')
+
+
+@admin_router.message(Command("mail"))
+async def mailing(m: Message):
+    text = m.text[5:]
+    errors, total = 0, 0
+
+    for chat_id in mailing_dict.keys():
+        try:
+            message = await bot.send_message(chat_id, text, parse_mode="MarkdownV2")
+            mailing_dict[chat_id] = message.message_id
+            total += 1
+        except TelegramBadRequest:
+            errors += 1
+
+    await m.answer(f'Успешно: {total}\nНеуспешно: {errors}\n\nДля удаления рассылки:\n/delete_last_mail')
+
+
+@admin_router.message(Command("delete_last_mail"))
+async def delete_mailing(m: Message):
+    for chat_id, message_id in mailing_dict.items():
+        try:
+            mailing_dict[chat_id] = 0
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except TelegramBadRequest:
+            continue
+
+    await m.answer('Успешно.')
+
+
 async def main():
     global users_dates, users_objects, users_schedules
 
+    today = date.today()
     users_objects = await db.get_users()
-    users_dates = {user_id: date.today() for user_id in users_objects.keys()}
+    users_dates = {user_id: today for user_id in users_objects.keys()}
     users_schedules = await db.get_short_schedule()
 
-    dp.include_router(error_router)
+    #  dp.include_router(error_router)
+    dp.include_router(admin_router)
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, handle_signals=False)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         asyncio.run(db.bullshit_cleanup())
+        save_data(mailing_dict, filename='mailing')
+        save_data(active_messages, filename='active_messages')

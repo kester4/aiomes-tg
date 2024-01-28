@@ -66,7 +66,7 @@ async def __parse_lessons(items):
         return '<b>В этот день уроков нет.</b>'
     res = ''
     for idx, lesson in enumerate(items):
-        res += f'<b>{idx + 1}.</b> {lesson.name}, {lesson.start_time} — {lesson.end_time}\n\n'
+        res += f'{idx + 1}. <b>{lesson.name}</b>, {lesson.start_time} — {lesson.end_time}\n\n'
     return res
 
 

@@ -62,7 +62,7 @@ def build_functions_inline() -> InlineKeyboardMarkup:
 
 def build_school_inline() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="О школе 🔍", callback_data='school_info')],
+        [InlineKeyboardButton(text="О школе 🔎", callback_data="school_info")],
         [InlineKeyboardButton(text="Меню столовой 🍴", callback_data='menu_cafe')],
         [InlineKeyboardButton(text="Меню буфета 🍭", callback_data='menu_buffet')],
         [InlineKeyboardButton(text='Расписание каникул ✨', callback_data='school_weekdays')],
