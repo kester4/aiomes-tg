@@ -1,0 +1,4 @@
+aiosqlite~=0.19.0
+playwright~=1.40.0
+aiofile~=3.8.8
+aiogram~=3.2.0
